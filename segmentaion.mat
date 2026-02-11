@@ -1,0 +1,107 @@
+clear; clc;
+
+%% ================= SETTINGS =================
+fs = 1000;   % Sampling frequency
+basePath = pwd;
+
+emgPath = fullfile(basePath,'DATA','EMG');
+imuPath = fullfile(basePath,'DATA','IMU');
+
+saveBase = fullfile(basePath,'SEGMENTED');
+
+% Create output folders
+mkdir(fullfile(saveBase,'STANCE','LEFT'));
+mkdir(fullfile(saveBase,'STANCE','RIGHT'));
+mkdir(fullfile(saveBase,'SWING','LEFT'));
+mkdir(fullfile(saveBase,'SWING','RIGHT'));
+
+%% ================= PROCESSING =================
+
+files = dir(fullfile(emgPath,'*.xlsx'));
+
+for f = 1:length(files)
+    
+    fileName = files(f).name;
+    
+    % Load EMG
+    emg = readmatrix(fullfile(emgPath,fileName));
+    emg_left  = emg(:,2:5);
+    emg_right = emg(:,6:9);
+    
+    % Load IMU
+    imu = readmatrix(fullfile(imuPath,fileName));
+    knee_left  = imu(:,2);
+    knee_right = imu(:,3);
+    
+    %% ----- EVENT DETECTION (LEFT) -----
+    knee_left = smoothdata(knee_left,'gaussian',round(0.05*fs));
+    vel_L = gradient(knee_left)*fs;
+    vel_L = smoothdata(vel_L,'gaussian',round(0.03*fs));
+    
+    zc_L = find(diff(sign(vel_L))~=0);
+    HS_L = [];
+    TO_L = [];
+    
+    for i = 2:length(zc_L)-1
+        idx = zc_L(i);
+        if vel_L(idx-1)>0 && vel_L(idx+1)<0
+            HS_L = [HS_L; idx];
+        elseif vel_L(idx-1)<0 && vel_L(idx+1)>0
+            TO_L = [TO_L; idx];
+        end
+    end
+    
+    %% ----- EVENT DETECTION (RIGHT) -----
+    knee_right = smoothdata(knee_right,'gaussian',round(0.05*fs));
+    vel_R = gradient(knee_right)*fs;
+    vel_R = smoothdata(vel_R,'gaussian',round(0.03*fs));
+    
+    zc_R = find(diff(sign(vel_R))~=0);
+    HS_R = [];
+    TO_R = [];
+    
+    for i = 2:length(zc_R)-1
+        idx = zc_R(i);
+        if vel_R(idx-1)>0 && vel_R(idx+1)<0
+            HS_R = [HS_R; idx];
+        elseif vel_R(idx-1)<0 && vel_R(idx+1)>0
+            TO_R = [TO_R; idx];
+        end
+    end
+    
+    %% ----- SEGMENTATION -----
+    stance_L = [];
+    swing_L  = [];
+    stance_R = [];
+    swing_R  = [];
+    
+    nL = min(length(HS_L)-1,length(TO_L));
+    nR = min(length(HS_R)-1,length(TO_R));
+    
+    for i = 1:nL
+        if HS_L(i)<TO_L(i)
+            stance_L = [stance_L; emg_left(HS_L(i):TO_L(i),:)];
+        end
+        if i+1<=length(HS_L) && TO_L(i)<HS_L(i+1)
+            swing_L = [swing_L; emg_left(TO_L(i):HS_L(i+1),:)];
+        end
+    end
+    
+    for i = 1:nR
+        if HS_R(i)<TO_R(i)
+            stance_R = [stance_R; emg_right(HS_R(i):TO_R(i),:)];
+        end
+        if i+1<=length(HS_R) && TO_R(i)<HS_R(i+1)
+            swing_R = [swing_R; emg_right(TO_R(i):HS_R(i+1),:)];
+        end
+    end
+    
+    %% ----- SAVE -----
+    writematrix(stance_L,fullfile(saveBase,'STANCE','LEFT',fileName));
+    writematrix(swing_L, fullfile(saveBase,'SWING','LEFT',fileName));
+    writematrix(stance_R,fullfile(saveBase,'STANCE','RIGHT',fileName));
+    writematrix(swing_R, fullfile(saveBase,'SWING','RIGHT',fileName));
+    
+end
+
+disp('All files segmented successfully.');
